@@ -6,10 +6,13 @@
 | --- | --- |
 | 文書種別 | Portfolio / Engineering Report |
 | ポートフォリオ版作成日 | 2026-08-30 |
-| Evidence snapshot | 2026-08-24 |
-| 対象環境 | Windows / Claude Code `2.1.241` / `claude-opus-5` |
+| Original evidence snapshot | 2026-08-24 |
+| Follow-up review snapshot | 2026-09-24 |
+| Original tested environment | Windows / Claude Code `2.1.241` / `claude-opus-5` |
 | 認証契約 | Claude.ai stored login / Claude Pro subscription |
-| 最終判定 | `G4_AUTH_SUBGATE = PASS`、`G4_OUTPUT_SUBGATE = BLOCKED_PERMISSION_CONTRACT` |
+| 2026-08-24 historical result | `G4_AUTH_SUBGATE = PASS`、`G4_OUTPUT_SUBGATE = BLOCKED_PERMISSION_CONTRACT` |
+| 2026-09-24 current disposition | `G4_REQUALIFICATION_REQUIRED` |
+| G5 | `NOT AUTHORIZED`：現行構成の G4 再 qualification 未実施 |
 | 原資料 | `E:\toeic_project\docs\CLAUDE_CODE_REVIEWER_INTEGRATION_CASE_STUDY_JA.md` |
 
 > この文書は、長大な実証記録をポートフォリオ／技術報告書向けに再編集したキュレーション版である。認証資格情報、ユーザーSID、端末名、support ID、request identifier は掲載しない。本文の PASS は、記載したバージョン、実行経路、測定条件にのみ適用され、運用上の正本や security specification を置き換えない。
@@ -18,14 +21,14 @@
 
 本稿の **G4** は、第4段階の結合検証ゲートを指す。auth source、実 provider 到達、reviewer isolation、structured output contract を個別の subgate として検証し、すべてが成立して初めて G4 全体を PASS とする。
 
-**G5** は、G4 通過後に review-only reviewer path を downstream の production orchestration へ進める次段階の検証ゲートである。本稿の evidence snapshot では G4 の output contract が未成立のため、G5 には進んでいない。
+**G5** は、G4 通過後に review-only reviewer path を downstream の production orchestration へ進める次段階の検証ゲートである。2026-08-24 の evidence snapshot では G4 の output contract が未成立のため、G5 には進んでいない。2026-09-24 時点でも現行構成の G4 再 qualification は未実施である。
 
-| 用語 | 本稿での意味 | 現在の状態 |
+| 用語 | 本稿での意味 | 2026-08-24 の観測／2026-09-24 の扱い |
 | --- | --- | --- |
-| G4 auth subgate | credential、auth source、実 provider 認証の結合検証 | PASS |
-| G4 output subgate | StructuredOutput、process、parse、final schema の検証 | BLOCKED |
-| G4 certification | auth と output を含む結合検証全体 | NOT READY |
-| G5 | G4 後の downstream production orchestration 検証 | 未着手 |
+| G4 auth subgate | credential、auth source、実 provider 認証の結合検証 | historical PASS／現行構成へ未継承 |
+| G4 output subgate | StructuredOutput、process、parse、final schema の検証 | historical BLOCKED／現行構成へ未継承 |
+| G4 certification | auth と output を含む結合検証全体 | `REQUALIFICATION_REQUIRED` |
+| G5 | G4 後の downstream production orchestration 検証 | `NOT AUTHORIZED` |
 
 ## 開発目的と対象プロダクト
 
@@ -43,6 +46,10 @@
 
 最終的に stored login から実 provider への到達と credential isolation は成立した。一方、Claude Code `2.1.241` の内部 `StructuredOutput` が `--permission-mode dontAsk` 下の local permission handler に拒否され、G4 全体は未完了となった。`bypassPermissions` や tool 権限拡大で無理に通すのではなく、**認証は PASS、出力契約は BLOCKED、G4 は未通過**と記録して upstream clarification 待ちにした。
 
+2026-09-24 の追補では、[現行 CLI reference](https://code.claude.com/docs/en/cli-reference)が `--json-schema` を正式な structured-output interface として記載し、無人の print-mode 実行向けに `--permission-prompts none`（v2.1.259 以降）も記載していることを確認した。公開契約が当時から変わっているため、`2.1.241` の blocker を現行構成へ自動継承しない。同様に historical PASS も現行構成の PASS にはならない。現行構成の bounded G4 再 qualification は未実施であり、現在状態は `REQUALIFICATION_REQUIRED`、`READY_FOR_G5 = NO` である。
+
+以下の評価表は 2026-08-24 の実証結果である。
+
 | 評価軸 | 判定 | 意味 |
 | --- | --- | --- |
 | Stored Claude.ai login | PASS | isolated credential domain から local auth を確立 |
@@ -55,7 +62,7 @@
 
 ## 1. 目標アーキテクチャ
 
-Claude Code の責務を review-only に限定し、provider request の前に認証源と実行環境を検証する。review result が完全な output contract を満たした場合だけ、下流の local authorization gate が利用できる。
+Claude Code の責務を review-only に限定し、provider request の前に認証源と実行環境を検証する。review result が完全な output contract を満たした場合だけ、下流の local authorization gate が利用できる。以下の図は 2026-08-24 の evidence snapshot で検証対象とした構成を表し、現行構成の qualification を意味しない。
 
 ```mermaid
 flowchart TD
@@ -76,6 +83,8 @@ flowchart TD
 この図の重要な点は、provider request が成功しても、StructuredOutput や final output contract が失敗すれば review result を成立させないことである。また、認証 preflight が不一致を検出した場合は、別 credential を試すのではなく provider process 起動前に停止する。
 
 ### 1.1 Reviewer の固定プロファイル
+
+以下も 2026-08-24 の実証で対象としたプロファイルであり、現行構成の検証済み設定ではない。
 
 ```text
 Model                = claude-opus-5
@@ -455,7 +464,7 @@ AUTOMATIC_SETUP_TOKEN_FALLBACK     = NO
 
 ## 8. StructuredOutput を permission failure として分離する
 
-Claude Code は `--json-schema` を使った structured output のために、内部で `StructuredOutput` を利用した。ordinary visible built-in tools は0のままだったが、内部 call は local permission handler に拒否された。
+2026-08-24 の実証では、Claude Code は `--json-schema` を使った structured output のために、内部で `StructuredOutput` を利用した。ordinary visible built-in tools は0のままだったが、内部 call は local permission handler に拒否された。
 
 ```text
 Permission to use StructuredOutput has been denied.
@@ -501,9 +510,9 @@ REVIEW_RESULT = NONE
 
 これは「部分結果を人間が読める」ことと「システムが APPROVE／REJECT／DELEGATE authority として採用できる」ことを分離する設計である。
 
-### 8.2 `dontAsk` と supported contract の未確定部分
+### 8.2 `dontAsk` と supported contract の履歴・現行資料
 
-local static artifact と既存 process evidence から、次は確認できた。
+2026-08-24 / Claude Code `2.1.241` の local static artifact と process evidence から、次は確認できた。
 
 ```text
 StructuredOutput implementation = present
@@ -513,7 +522,7 @@ Permission denial = internal Claude Code permission handler
 Permission mode = dontAsk
 ```
 
-しかし、次は `UNVERIFIED` のまま残した。
+当時、次は `UNVERIFIED` のまま残した。
 
 - `StructuredOutput` が ordinary model-visible tool か。
 - `--allowedTools StructuredOutput` が supported か。
@@ -534,22 +543,42 @@ Do not change transport speculatively.
 Ask upstream.
 ```
 
-Anthropic Support へ、StructuredOutput と `dontAsk` の supported permission contract、narrow explicit allow の可否、`stream-json`／`json` の挙動差、既知 bug かどうかを照会し、回答待ちとした。
+当時は Anthropic Support へ、StructuredOutput と `dontAsk` の supported permission contract、narrow explicit allow の可否、`stream-json`／`json` の挙動差、既知 bug かどうかを照会し、回答待ちとした。
 
-### 8.3 Blocked 時の次の一手
+2026-09-24 の[現行 CLI reference](https://code.claude.com/docs/en/cli-reference)と[permission documentation](https://code.claude.com/docs/en/permissions)では、次の公開契約を確認できる。
 
-公式回答が得られない場合も、現行の安全な baseline を維持したまま、変更を一度に一つだけ加えた比較検証へ進む。permission を広げて一時的に動かすことは、G4 の解決とは扱わない。
+- `--json-schema` は print mode 専用で、agent workflow 完了後に指定 JSON Schema に一致する validated JSON output を取得する正式な CLI 機能である。
+- `--tools ""` は built-in tools を無効化する。MCP tools には適用されず、MCP surface は別途ゼロにする必要がある。内部 StructuredOutput の permission 判定とも同一視しない。
+- `dontAsk` は通常なら承認を求める call を自動拒否する permission mode であり、適用可能な allow rule で事前承認された call まで一律に拒否するものではない。`StructuredOutput` を積極的に許可する設定ではない。
+- `--permission-prompts none` は v2.1.259 以降の無人・headless print-mode 実行向け option である。通常の permission mode と rule の判定後、回答者のいない未解決 prompt を拒否する。`StructuredOutput` の narrow allow でも、当時の denial が修復された証拠でもない。
 
-| 優先度 | 次の検証 | promotion 条件 |
-| --- | --- | --- |
-| 1 | 現行 `2.1.241` で StructuredOutput の最小再現ケースを固定 | provider auth、ordinary tools = 0、MCP = 0、subagents = 0 を維持 |
-| 2 | 別 Claude Code version の候補を1つずつ比較（downgrade／upgrade を含む） | version変更後に auth、child env、permission、output contract を再 qualification |
-| 3 | `--output-format json` と現行 `stream-json` を同一 schema で比較 | exit、complete response、parse、final schema がすべて PASS |
-| 4 | 必要なら schema や `dontAsk` の最小差分を一変数ずつ検証 | `bypassPermissions`、tool拡大、fallback、retryなしで原因を説明可能 |
+現行公開 permission documentation からは、`StructuredOutput` を通常の permission allow rule に明示追加する supported production repair は確立できない。Support 回答だけを唯一の解除条件とはせず、現行構成の bounded requalification で実際の契約を検証する。
 
-JSON mode や application-side JSON validation は、実験用の候補であって即時の production workaround ではない。schema が無い、途中で切れる、nonzero exit になる、意味的に曖昧な出力になる場合は、従来どおり `REVIEW_RESULT = NONE` として拒否する。
+### 8.3 現行構成の次の一手
 
-すべての候補が reviewer isolation と complete output contract を同時に満たさない場合は、G4 を BLOCKED のまま維持する。これは未解決を放置するのではなく、security contract を崩さない stop rule である。
+第一工程は、現在選択されている Claude Code 構成に対する bounded G4 再 qualification である。本追補は文書更新のみであり、この検証は実行しない。permission を広げて一時的に動かすことは、G4 の成立とは扱わない。
+
+```text
+AUTH_SOURCE = STORED_CLAUDE_AI_LOGIN
+COMPETING_CREDENTIAL_SOURCE = 0
+ORDINARY_MODEL_VISIBLE_TOOLS = 0
+MCP = 0
+SUBAGENTS = 0
+SESSION_PERSISTENCE = disabled
+AUTOMATIC_PROVIDER_RETRY = 0
+AUTOMATIC_AUTH_FALLBACK = 0
+
+--json-schema contract = complete
+STRUCTURED_OUTPUT = present and schema-valid
+PROCESS_EXIT_CODE = 0
+UNRESOLVED_INTERACTIVE_PERMISSION_PROMPT = 0
+PARTIAL_RESPONSE_CAN_BECOME_REVIEW = NO
+bypassPermissions = not used
+```
+
+`--permission-prompts none` は無人実行の設定候補として評価できるが、StructuredOutput denial の修復として先に認定しない。必要なら output format、schema、permission mode の比較を一変数ずつ行う。JSON mode や application-side JSON validation は即時の production workaround ではない。schema が無い、途中で切れる、nonzero exit になる、意味的に曖昧な出力になる場合は、従来どおり `REVIEW_RESULT = NONE` として拒否する。
+
+現行構成が reviewer isolation と complete output contract を同時に満たす証拠を得るまで、`CURRENT_G4_CERTIFICATION = REQUALIFICATION_REQUIRED`、`READY_FOR_G5 = NO` とする。
 
 ## 9. Fail-Closed lifecycle と運用ガードレール
 
@@ -592,12 +621,12 @@ Local authorization gate
 - prelaunch fail-closed の process attempt を記録する。
 - auth failure と output failure を同じ `UNINITIALIZED` に戻さない。
 - nonzero exit の partial output を review authority にしない。
-- 不明な permission contract を推測で広げず、upstream の supported narrow repair を待つ。
+- 不明な permission contract を推測で広げず、現行の公式契約を確認して bounded requalification する。
 - credential content を読まず、metadata と provider response だけを証拠にする。
 
-## 10. 現在の判定：閉じたもの、閉じていないもの
+## 10. 判定：2026-08-24 の実証と現在の扱い
 
-### Closed / accepted
+### 2026-08-24 に Closed / accepted と観測した範囲
 
 - Stored Claude.ai login による local auth。
 - stored login から実 provider への到達と、当該 G4 run での401未観測。
@@ -610,13 +639,25 @@ Local authorization gate
 - prelaunch auth wiring defect の検出と provider process 未起動。
 - partial output を `REVIEW_RESULT = NONE` とする拒否規則。
 
-### Blocked / not ready
+### 2026-08-24 に Blocked / not ready と観測した範囲
 
-- Claude Code `2.1.241` の `StructuredOutput + dontAsk` supported permission contract。
-- ordinary model-visible tools = 0 を維持したまま StructuredOutput だけを許可できるか。
-- `--json-schema`、`stream-json`、`safe-mode` の組み合わせによる intended behavior。
-- G4 全体 certification。
-- G4 通過を前提とする G5。
+- Claude Code `2.1.241` で `StructuredOutput + dontAsk` の permission denial を観測し、G4 output subgate は BLOCKED。
+- ordinary model-visible tools = 0 を維持したまま StructuredOutput だけを許可できるかは未確定。
+- `--json-schema`、`stream-json`、`safe-mode` の組み合わせによる当時の intended behavior は未確定。
+- G4 全体 certification は未通過、G5 は未着手。
+
+### 2026-09-24 の current disposition
+
+```text
+HISTORICAL_G4_AUTH_SUBGATE   = PASS
+HISTORICAL_G4_OUTPUT_SUBGATE = BLOCKED
+CURRENT_BLOCKER_INHERITED    = NO
+HISTORICAL_G4_PASS_INHERITED = NO
+CURRENT_G4_CERTIFICATION     = REQUALIFICATION_REQUIRED
+READY_FOR_G5                 = NO
+```
+
+当時の blocker と PASS はいずれも現行構成へ自動継承しない。現行構成の G4 は未 qualification であり、G5 は承認されていない。
 
 ### Not claimed
 
@@ -637,7 +678,7 @@ Local authorization gate
 4. **Fail-Closed の実証** — wiring defect を provider process 起動前に検出し、`PROCESS_ATTEMPT_COUNT = 0` で停止した。
 5. **最小権限の維持** — `bypassPermissions` で通すのではなく、ordinary tools、MCP、subagents をゼロにした。
 6. **出力を authority にしない設計** — stdout が存在しても、exit、response、parse、schema が欠ければ `REVIEW_RESULT = NONE` とした。
-7. **不確実性の明示** — `UNVERIFIED`、`BLOCKED`、`NOT CLAIMED` を PASS に変換せず、upstream support へ引き渡した。
+7. **不確実性の明示** — `UNVERIFIED`、`BLOCKED`、`NOT CLAIMED` を PASS に変換せず、version ごとの evidence と現行公開契約を照合した。
 8. **小さな制御面への収束** — OAuth refresh、credential parser、大規模 lease manager を自作せず、既存 product の supported lifecycle と局所的な制御機構を使った。
 
 ## Lessons Learned：LLMエージェント統合へ一般化できる設計パターン
@@ -654,7 +695,7 @@ Claude Code `2.1.241` 固有の permission 挙動を超えて、CI/CD や別の 
 | **状態と失敗を型付けする** | auth failure、provider failure、output failure を retry で混ぜない | `AUTH_INVALID`、`PROVIDER_REJECTED`、`FAILED_OUTPUT_CONTRACT` を分離 |
 | **Lock と single-writer を置く** | credential／state の観測から実行までの競合を防ぐ | auth status から result classification まで lock 保持 |
 | **Qualification の scope を固定する** | version、設定、identity が変われば旧 PASS を継承しない | `2.1.241`、stored login、zero-tool profile に限定 |
-| **Upstream-first で狭く直す** | 不明な permission を広げず、supported contract を確認する | `bypassPermissions` を拒否し Support へ照会 |
+| **現行契約を確認して再 qualification する** | version-scoped evidence を保持し、公開契約の変更で古い前提を失効させる | 公式資料を確認し、現行構成の bounded G4 再 qualification を次工程に設定 |
 
 他の agent を CI/CD やローカル実行系へ組み込む場合も、基本形は次のまま再利用できる。
 
@@ -692,7 +733,7 @@ Parser / output contract
 Authorization boundary
 ```
 
-認証と credential isolation は成立している。しかし、内部 `StructuredOutput` と `dontAsk` の supported contract が未確定である以上、G4 全体を production-ready と呼ばない。この「動かすために security contract を崩さず、閉じた範囲だけを PASS とする」判断こそが、本取り組みの技術的な成果である。
+Claude Code `2.1.241` で観測した `StructuredOutput` denial と auth subgate PASS は、2026-08-24 の歴史的証拠として有効である。当時の blocker を現行構成へ自動継承せず、公開契約の更新だけで現行 G4 を PASS にもしない。現在状態は `CURRENT_G4_CERTIFICATION = REQUALIFICATION_REQUIRED`、`READY_FOR_G5 = NO` であり、現行構成の bounded G4 evidence が得られるまで G5 へ進めない。
 
 ## Appendix A. Final Security Invariants
 
@@ -726,20 +767,23 @@ PARTIAL_RESPONSE_CAN_BECOME_REVIEW = NO
 
 </details>
 
-## Appendix B. Current Open Question
+## Appendix B. Current Requalification Question
 
-Claude Code `2.1.241` について、次の条件を同時に満たす supported configuration は未確定である。
+現在選択されている Claude Code 構成で、次の条件を同時に満たせるかを bounded G4 再 qualification で検証する。
 
 ```text
---json-schema structured output works
-ordinary model-visible tools remain zero
-execution is headless
-no interactive permission prompt occurs
+--json-schema output is validated and complete
+ordinary model-visible tools = 0
+MCP = 0
+subagents = 0
+execution is headless and unattended
+unresolved permission prompts do not wait for a human
 bypassPermissions is not used
-filesystem / shell / web / MCP capabilities remain unavailable
+partial output is not promoted to review authority
+process exit = 0 and complete output contract = PASS
 ```
 
-Anthropic Support の公式回答、または version change 後の再現可能な evidence が得られるまで、G4 は `READY_FOR_G5 = NO` とする。
+`--permission-prompts none` は未回答 prompt を拒否するための候補であり、StructuredOutput の許可や旧 blocker の修復を証明しない。現行構成の再現可能な evidence が得られるまで、`CURRENT_G4_CERTIFICATION = REQUALIFICATION_REQUIRED`、`READY_FOR_G5 = NO` とする。
 
 ## Appendix C. Reopen Conditions
 
@@ -751,3 +795,5 @@ Anthropic Support の公式回答、または version change 後の再現可能�
 - reviewer に ordinary tool、MCP、subagent、filesystem capability を追加する変更。
 - retry、fallback、automatic login、session persistence を有効化する変更。
 - Windows user、UAC、install method、親 directory ACL の変更。
+
+今回の follow-up は Claude Code の version／公開実行契約の変更という既存条件の適用である。旧 qualification を自動継承せず、現行構成の再 qualification を要求する。
