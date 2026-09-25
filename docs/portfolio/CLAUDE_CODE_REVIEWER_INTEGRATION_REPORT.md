@@ -797,3 +797,199 @@ process exit = 0 and complete output contract = PASS
 - Windows user、UAC、install method、親 directory ACL の変更。
 
 今回の follow-up は Claude Code の version／公開実行契約の変更という既存条件の適用である。旧 qualification を自動継承せず、現行構成の再 qualification を要求する。
+
+## Appendix D. Architecture Supersession：Remote Desktop Commander の導入による primary path の変更
+
+### D.1 結論
+
+本レポートで検証した Claude Code review-only executor 経路は、2026-08-24 時点では、ChatGPT を起点とする判断系とローカル Windows 環境の間に、限定権限の review / execution surface を成立させるための合理的な候補だった。
+
+その後、ChatGPT から認可済みローカル PC へ直接接続できる Remote Desktop Commander が利用可能になった。Remote Desktop Commander は、remote host 上の filesystem、terminal、process を ChatGPT から直接操作する host-exposed tool surface を提供する。
+
+現在確認できる主要な制御面は次である。
+
+```text
+authorized remote device
+allowedDirectories
+blockedCommands
+default shell
+current connected client
+filesystem read / write
+terminal / process execution
+process inspection
+tool-call history
+```
+
+この変化により、本レポートが Claude Code に課していた主要責務の大部分は、Claude Code を経由せずに実現可能になった。
+
+したがって、Claude Code を primary local executor として成立させるための G4 再 qualification は、現在の project architecture を進めるための必要条件ではない。
+
+現在の architecture disposition は次のとおりである。
+
+```text
+PRIMARY_LOCAL_EXECUTION_PATH = REMOTE_DESKTOP_COMMANDER
+CLAUDE_CODE_LOCAL_EXECUTOR_PATH = SUPERSEDED
+CLAUDE_CODE_G4_REQUALIFICATION_REQUIRED_FOR_PRIMARY_PATH = NO
+CLAUDE_CODE_G5_REQUIRED_FOR_PRIMARY_PATH = NO
+CLAUDE_CODE_OPTIONAL_SECOND_MODEL_REVIEW = SEPARATE / OPTIONAL
+HISTORICAL_CLAUDE_CODE_EVIDENCE = PRESERVED
+```
+
+これは、2026-08-24 に取得した Claude Code の evidence を否定するものではない。変更されたのは過去の観測結果ではなく、その経路を primary architecture として成立させる必要性そのものである。
+
+### D.2 当初 Claude Code に求めていた役割
+
+本レポートの目的は、単に Claude を利用することではなかった。Claude Code を限定権限の review-only execution boundary として用い、ChatGPT 主体の orchestration からローカル Windows 環境へ安全に到達することが目的だった。
+
+そのため、stored login、provider authentication、credential isolation、zero ordinary tools、zero MCP、zero subagents、session persistence 無効化、automatic retry / fallback 無効化、schema-valid structured output、partial output rejection、nonzero exit rejection、permission fail-closed といった条件を同時に成立させる必要があった。
+
+これらの複雑性の多くは Claude の推論能力そのものではなく、Claude Code を local execution transport と permission boundary と structured-result transport の三役に使うことから生じていた。
+
+### D.3 Remote Desktop Commander によって消滅した中間層
+
+旧経路は概念的に次のような多段構造だった。
+
+```text
+ChatGPT / orchestration
+  → Claude Code CLI
+  → Claude.ai stored login
+  → Anthropic provider
+  → Claude model
+  → Claude Code permission machinery
+  → StructuredOutput
+  → local parser / result gate
+  → local authorization
+  → repository operation
+```
+
+Remote Desktop Commander を primary local path とした場合、local machine への到達だけを目的とするなら、Claude Code CLI qualification、Claude.ai authentication dependency、Anthropic provider availability、second-model inference、StructuredOutput permission contract、dontAsk interaction、schema-producing model turn、version-specific permission behaviorを primary path から外せる。
+
+新しい基本経路は次のように短縮できる。
+
+```text
+ChatGPT / orchestration
+  → task-level authorization
+  → Remote Desktop Commander
+  → authorized remote host
+  → filesystem / terminal / process
+  → repository / verification / Git
+```
+
+これは単純な tool 置換ではない。execution authority の位置を、model-mediated permission path から host-exposed bounded tool path へ移す変更である。
+
+### D.4 Authority topology と security boundary の観点での劣後
+
+Claude Code 経路では、local operation へ到達するまでに Claude Code 自身の permission model を通過する必要がある。本ケースでは ordinary tools をゼロ化しても、内部 StructuredOutput が local permission handler に入り、permission denial によって complete output contract が成立しなかった。
+
+この種の product-internal permission semantics は project 側から完全には支配できない。Remote Desktop Commander では、directory access、command access、write access、process access を host / connector layer の authority boundaryとして扱える。
+
+したがって、問題を
+
+```text
+model-internal StructuredOutput call が許可されるか
+```
+
+から
+
+```text
+この task で、この remote host 上の、この path / command operation を許可するか
+```
+
+へ移せる。これは既存の task packet、exact-path scope、Git authorization、destructive-operation prohibition と直接対応する。
+
+Remote Desktop Commander の採用は security control を不要にするものではない。むしろ local filesystem と terminal へ直接到達できるため、exact task authorization、read/write distinction、command boundary、credential non-disclosure、pre/post-write verification を host-side governance として明示する必要がある。
+
+ただし、Claude Code 固有の StructuredOutput permission、dontAsk interaction、provider authentication、model-visible tool surface を primary local access のために重ねる必要はなくなる。security を弱めるのではなく、enforcement を目的に近い host layer へ移す。
+
+### D.5 Dependency、determinism、observability の観点での劣後
+
+Claude Code 経路では、Claude Code executable / version、stored login、credential source selection、provider reachability、Anthropic authentication、subscription / entitlement、model availability、permission behavior、StructuredOutput、JSON schema、process exit、local parser が連鎖する。どれか一つの変更でも qualification scope が変わり得る。
+
+Remote Desktop Commander にも remote device connectivity、connector availability、host permissions、allowed path、command restriction という dependency は存在する。しかし local filesystem や terminal へ到達する目的だけなら、second-model inference、provider authentication、structured-output generation を transport prerequisite にしなくてよい。
+
+また Claude Code 経路では、local operation の前に model inference が存在するため、同じ目的でも tool call や response construction が変化し得る。そのため schema validation、complete-response gate、nonzero-exit rejection、partial-output rejection が必要だった。
+
+Remote Desktop Commander では read exact path、write exact path、run exact command、inspect exact process を個別 host operation として扱える。LLM が判断する層と OS operation を実行する層を分離できるため、execution semantics はより直接的である。
+
+failure observability も単純化される。Claude Code 経路では auth failure、provider rejection、permission denial、model response failure、schema failure、parser failure を切り分ける必要があった。Remote Desktop Commander 経路では、local-state verification を target path、command、process、exit、file contents、Git diff、Git status に近づけられる。
+
+### D.6 Latency、運用コスト、version drift の観点での劣後
+
+Claude Code 経路は provider round trip、model inference latency、token consumption、CLI orchestration、structured-output generation を伴う。ファイルを読む、Git status を確認する、diff を見る、既に決定された verification command を実行するだけでも second model を介在させる構造になる。
+
+Remote Desktop Commander ではこれらを host tool として直接発行できるため、second model を使う価値を独立した意味判断、設計批評、semantic code review、blind verification のような用途へ限定できる。
+
+Claude Code を primary execution boundary とすると、version change 自体が architecture event になる。本ケースでも `2.1.241` の historical evidence から公開契約変更を経て、G4 requalification が必要になった。primary path を Remote Desktop Commander へ移すことで、この requalification burden を local transport の成立条件から外せる。
+
+### D.7 Remote Desktop Commander が置き換えないもの
+
+Remote Desktop Commander は Claude model ではない。したがって、independent second-model review、Claude / Opus 固有の reasoning を使った批評、別 model による blind verification、architecture challenge、semantic code review まで不要になるわけではない。
+
+ただし、その場合の Claude の役割は `LOCAL EXECUTOR` ではなく `OPTIONAL INDEPENDENT REVIEWER` である。
+
+second-model review が失敗しても local repository への基本アクセスが失われる architecture にはしない。Claude path は primary execution dependency から切り離す。
+
+### D.8 なぜ G4 requalification を続けないのか
+
+2026-09-24 の follow-up で `CURRENT_G4_CERTIFICATION = REQUALIFICATION_REQUIRED` とした判断は、その時点では妥当だった。
+
+しかし Remote Desktop Commander が primary local execution objective を満たす execution surface として利用可能になったことで、意思決定条件が変わった。
+
+G4 を再 qualification して得られるのは「Claude Code も local review-only executor として利用可能である」という追加経路である。一方、G4 を再 qualification しなくても Remote Desktop Commander 経路で primary local execution objective を満たせる。
+
+そのため、qualification cost、provider dependency、version-specific maintenance、permission-surface investigation、future requalification burden を引き受ける合理性は失われた。
+
+```text
+CURRENT_G4_CERTIFICATION = REQUALIFICATION_REQUIRED   # historical/current qualification state
+G4_REQUALIFICATION_IS_ACTIVE_PROJECT_BLOCKER = NO
+```
+
+G4 を FAIL や PASS に変更するのではない。primary architecture から外れたため、qualification 継続の必要性が消滅したのである。
+
+### D.9 Final Architecture Disposition
+
+本ケースは、Claude Code integration が技術的に失敗したため終了するのではない。
+
+2026-08-24 の実証では、Claude Code `2.1.241` における authentication、credential isolation、permission boundary、structured-output failure を実際に観測し、review-only executor を安全に成立させるための条件を明確化した。
+
+2026-09-24 には product contract の変化を受けて、旧 evidence を現行版へ自動継承せず、`REQUALIFICATION_REQUIRED` と判断した。
+
+その後 Remote Desktop Commander により、より直接的な host execution surface が利用可能になった。その結果、同じ local execution objective に対し Claude Code 経路は次の点で劣後する。
+
+```text
+more intermediary layers
+more authentication dependencies
+more version-dependent behavior
+additional model inference
+additional permission semantics
+additional output-contract requirements
+larger failure surface
+larger requalification surface
+higher operational latency
+higher maintenance cost
+```
+
+一方、Remote Desktop Commander 経路では local operation を host-exposed tool として直接扱い、既存の task authorization、path scope、command boundary、Git authorization、verification によって管理できる。
+
+したがって、現在の project architecture では次を最終判断とする。
+
+```text
+PRIMARY_LOCAL_EXECUTION_PATH = REMOTE_DESKTOP_COMMANDER
+CLAUDE_CODE_AS_PRIMARY_LOCAL_EXECUTOR = SUPERSEDED
+CLAUDE_CODE_G4_REQUALIFICATION = NOT_REQUIRED_FOR_PRIMARY_ARCHITECTURE
+CLAUDE_CODE_G5 = NOT_REQUIRED_FOR_PRIMARY_ARCHITECTURE
+CLAUDE_CODE_AS_OPTIONAL_SECOND_MODEL_REVIEWER = REMAINS_AVAILABLE_AS_A_SEPARATE_WORKSTREAM
+HISTORICAL_G4_EVIDENCE = PRESERVED
+HISTORICAL_REQUALIFICATION_REQUIRED_DECISION = PRESERVED
+ACTIVE_PROJECT_BLOCKER_FROM_CLAUDE_CODE = NONE
+```
+
+この変更によって、本レポートの過去の qualification evidence は失効しない。むしろ、本ケースの最終的な技術的結論は次のように整理される。
+
+> 安全な agent integration では、一度選んだ executor を最後まで成立させること自体を目的にしてはならない。より直接的で、authority boundary が明確で、依存関係が少なく、観測可能性の高い host execution surface が利用可能になった場合、既存経路の qualification に投じた過去のコストに拘束されず、primary architecture をより単純な経路へ移すべきである。
+
+Claude Code 経路は、その設計・失敗・再 qualification 判断を含めて historical engineering evidence として保持する。
+
+しかし、Remote Desktop Commander が利用可能になった現在、Claude Code を local execution intermediary として成立させることは project completion の前提ではない。
+
+**この理由により、Claude Code review-only executor integration の primary-path investigation をここで終了する。**
