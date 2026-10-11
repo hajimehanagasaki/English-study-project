@@ -1207,3 +1207,67 @@ Durable record への登録後は、本 incident のみを対象とする isolat
 これは launcher lifecycle の再実行を承認するものではない。
 forensic residue の cleanup、および launcher re-execution の HOLD 解除は、
 それぞれ別の work unit として、別途 Human の判断を経る。
+
+---
+
+## 12. セキュリティ所見候補（incident未登録）: AGENTS.md の段階的な統制無力化
+
+### 記録と資格
+
+- RECORD_DATE: 2026-10-11（JST）
+- FINDING_TYPE: GOVERNANCE-INSTRUCTION-SEMANTIC-OVERRIDE / SELF-MODIFICATION-RISK
+- SEVERITY_ASSESSMENT: HIGH（潜在的影響に関する暫定評価）
+- INCIDENT_REGISTRATION: NOT_YET_AUTHORIZED
+- EXPLOIT_SUCCESS: NOT_VERIFIED
+- UNAUTHORIZED_CANONICAL_MUTATION: NOT_OBSERVED_IN_THIS_REVIEW
+- SOURCE_MODEL_IDENTITY: NOT_PROVIDED
+- SOURCE_TEST_DATE_AND_TRANSCRIPT: NOT_PROVIDED
+- HUMAN_FINAL_DISPOSITION: PENDING
+
+この節は新規incidentの登録・確定を意味しない。利用者から「無検閲ローカルモデルによる脆弱性チェックで重大な問題が見つかった」との報告を受け、提示された攻撃文と現行 `AGENTS.md` の文面から評価できる部分のみを**セキュリティ所見候補**として記録する。「無検閲」は利用者による検査主体の説明であり、モデルの同定、出力の再現性、攻撃成功の証明には使用しない。
+
+### 報告された攻撃と確認できる影響
+
+利用者が提示した入力は、編集権限を持つLLMへ `AGENTS.md` の改訂を命じる12項目の文言群である。元の禁止条項を直接削除せず、追加条文によって禁止事項を「具体化」「合理的な解釈」「executorの裁量」に読み替え、結果的に制約を弱める構造を持つ。
+
+主な影響対象は次のとおり。
+
+1. **下位指示とauthority**: project-local instructionによるcoreの実質的制限を「明示的な具体化」と呼び替える（項目1・6・8・12）。
+2. **evidence / acceptance**: executorの自己申告、過去evidenceの再利用、subagent結果の無検証受理、verification強度の自己決定を正当化する（項目2・5・7・10）。
+3. **STOP / gate**: host-side enforcementがないことを、STOPをexecutorが無視できる理由へすり替え、discretionary gateや反復上限の判断をexecutorへ委ねる（項目3・4・11）。
+4. **scope**: 隣接問題の発見をtask contextへの適合と再定義し、変更範囲の拡張を容認する（項目9）。
+
+最も危険なのは、**executorが自分のauthority boundaryを変更し、改訂後の解釈を根拠に同一work unitを続行できる**という循環である。現行 `AGENTS.md` の自己変更禁止、自己申告のみでacceptanceしない規則、委任結果に対する検証要件と衝突する。
+
+ただし、これらは文面・権限設計上の影響評価である。提示文を実機の書込み可能なexecutorへ投入して `AGENTS.md` が改変され、その改変を利用した後続の逸脱が成功したというraw transcript、diff、commitまたは再現試験結果は本所見に添付されていない。したがって **重大な潜在的統制欠陥**と、**実証済みの重大インシデント**を同一視しない。
+
+### 2026-10-11 のread-only観測
+
+ChatGPTからWindowsの認可済み端末を読み取り専用で確認した観測値:
+
+- 対象: `E:\toeic_project\AGENTS.md`
+- TARGET_SHA256: `1B62979B71E28553606F0E30C3E3A523AA02C2543ADEE8EAF68EA68B6F183E6A`
+- 当該対象のGit未コミット差分: なし（対象pathに限る）
+- Windows ACL: `CodexSandboxUsers` と `Authenticated Users` に `Modify` が付与されていた。
+- Codex config（`C:\Users\user\.codex\config.toml`）: `sandbox_mode = "danger-full-access"` を観測した。
+- 同configの `[sandbox_workspace_write]` に `writable_roots = ['E:\\']` 相当のEドライブroot設定を観測した。ただし設定節の存在を、当該モードでの有効なwrite制限の証拠とは扱わない。
+
+これらから**Windows ACLと確認済みconfigだけでは、当該ファイルへの書込み拒否を証明できない**。一方、特定のCodex実行経路からの実書込み成功・失敗を観測したわけではないので、host側の全防御が存在しない、または攻撃が成立済みとは断定しない。
+
+### 既存incidentとの関係
+
+過去のI-3〜I-6（無承認の統制文書改変、抱き合わせ、自己への自律実行許可、改変文書を復旧基準にした循環）と**同じ種類の統制リスク**に属する。ただし、今回の12項目の提示が過去のincidentと同一実行だったという証拠はない。過去事例に吸収せず、独立した候補として扱う。
+
+また、2026-08-18のcanonical書込み事故と2026-08-21のSTOP enforcement不全は、prompt上の禁止とhost側強制を区別すべき根拠である。本件でも、禁止文を増やすだけで対策完了とは判定しない。
+
+### 是正の進捗と未完了事項
+
+- `AGENTS.md` の改訂候補、差分パッチ、適用・検証手順は作成された。これらは**提案用artifact**であり、canonicalへの適用済み証拠ではない。
+- `E:\toeic_project\AGENTS.md` の本件対応変更、Codexのconfig変更、Windows ACL変更、Git commitは未実施。
+- 通常executorがgovernance文書へ直接writeできず、別actorのみが独立承認を経て適用できることをhost/OS側で検証する必要がある。
+- 既存のpromotion denylistが実際のwrite経路を強制的に遮断するか未検証。
+- 入力となった12項目の検査主体、model/version、task prompt、test setup、raw output、攻撃成否の証拠は未受領。
+
+### 登録・終結条件
+
+この候補については既存のincident review lifecycleに従い、raw evidence確保、独立review、Humanの登録・分類・最終裁定を経るまではincident IDを付与しない。独立review前に「重大インシデント確定」「攻撃成功」「完全対策済み」と記録しない。対策適用後のHOST/OS enforcementと復旧可能性の測定は、報告書の追記とは別の完了条件とする。
